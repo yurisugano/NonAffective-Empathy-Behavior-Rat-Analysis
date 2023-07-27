@@ -1,5 +1,5 @@
 ---
-title: "AffectiveCognitiveAnalysis"9iol;/
+title: "AffectiveCognitiveAnalysis"
 format: html
 editor: visual
 execute:
@@ -20,7 +20,6 @@ library(ggplot2)
 library(data.table)
 
 
-setwd("~/Library/CloudStorage/Box-Box/Cognitive + Affective Empathy/Data and Data Analysis/R Scripts/")
 
 df <- readxl::read_excel(path = "TrappedAllData.xlsx", sheet = "Latency")
 
