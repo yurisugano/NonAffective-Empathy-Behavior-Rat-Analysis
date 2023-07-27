@@ -4,4 +4,4 @@ This project investigates the requirement of affective cues for pro-social behav
 
 For original pre-pring, see Helping can be driven by non-affective cues in rat. Y. Vieira Sugano, H.Z. Shan, N.M.R. Molasky, P. Mason. bioRxiv 2022.07.01.498150; doi: https://doi.org/10.1101/2022.07.01.498150
 
-Note that the analysis in the pre-print version is not aligned with the analysis presented here. After careful consideration of the experimental setup, logistic regression and generalized mixed models were deemed more appropriate.
+Note that the analysis in the pre-print version is not aligned with the analysis presented here. 
