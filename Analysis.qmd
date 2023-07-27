@@ -1,0 +1,293 @@
+---
+title: "AffectiveCognitiveAnalysis"9iol;/
+format: html
+editor: visual
+execute:
+  warning: false
+  error: false
+---
+
+### Affective Cognitive analysis
+
+### 1. Load and manipulate data 
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(robustbase)
+library(lme4)
+library(ggplot2)
+library(data.table)
+
+
+setwd("~/Library/CloudStorage/Box-Box/Cognitive + Affective Empathy/Data and Data Analysis/R Scripts/")
+
+df <- readxl::read_excel(path = "TrappedAllData.xlsx", sheet = "Latency")
+
+df <- df %>%
+  select(condition:D12) %>%
+  gather(day, opening, -Rat, -condition) 
+
+df$opening <- ifelse(df$opening == 40, 0, 1)
+
+df$day <- as.numeric(gsub("\\D", "", df$day))
+
+df <- df %>%
+  arrange(Rat, day)
+
+```
+
+### 2. A Markov-chain model
+
+The following states are defined.
+
+-   0: a rat has never opened before
+
+-   1: a rat has opened for the first time
+
+-   2: a rat has opened consecutively
+
+-   3: a rat is on a break after opening
+
+-   4: a rat has opened after a break
+
+The following transitions are allowed. The assumption is that the probability of transitions only depend on current state. While this isn't true, the design of the states takes care of some violations of that assumption.
+
+-   0 to 0: not an opener
+
+```{=html}
+<!-- -->
+```
+-   0 to 1: new opener
+
+-   1 to 2: new consecutive opener
+
+-   2 to 2: streak of consecutive openings
+
+-   1 to 3: new break
+
+-   2 to 3: break after consecutive openings
+
+-   3 to 3: streak of breaks
+
+-   3 to 4: opening after a break
+
+-   4 to 2: becoming a consecutive opener after a break
+
+-   4 to 3: taking a new break after opening again
+
+The following transitions are not allowed
+
+-   0 to 2, 3 or 4: require the intermediate state 1
+
+-   1 to 1: a rat can't open for the first time after opening once
+
+-   1 to 4: require the intermediate state 3
+
+-   2 to 1: a rat can't open for the first time after opening consecutively
+
+-   2 to 4: require the intermediate state 3
+
+-   3 to 1: a rat can't open for the first time after a break from opening
+
+-   3 to 2: require the intermediate state 4
+
+-   4 to 1: a rat can't open for the first time after opening following a break
+
+-   4 to 4: a consecutive opening after 4 will lead to state 2
+
+These restrictions result in the following Markov chain transition matrix
+
+```{r}
+# Define state labels
+states <- c("Never Opened (0)", "First Time Opener (1)", "Consecutive Opener (2)", "On Break (3)", "Open after Break (4)")
+
+# Define the transition matrix
+transition_matrix <- matrix(0, nrow = 5, ncol = 5, dimnames = list(states, states))
+
+# Define allowed transitions
+transition_matrix["Never Opened (0)", "Never Opened (0)"] <- "p00"
+transition_matrix["Never Opened (0)", "First Time Opener (1)"] <- "p01"
+transition_matrix["First Time Opener (1)", "Consecutive Opener (2)"] <- "p12"
+transition_matrix["Consecutive Opener (2)", "Consecutive Opener (2)"] <- "p22"
+transition_matrix["First Time Opener (1)", "On Break (3)"] <- "p13"
+transition_matrix["Consecutive Opener (2)", "On Break (3)"] <- "p23"
+transition_matrix["On Break (3)", "On Break (3)"] <- "p33"
+transition_matrix["On Break (3)", "Open after Break (4)"] <- "p34"
+transition_matrix["Open after Break (4)", "Consecutive Opener (2)"] <- "p42"
+transition_matrix["Open after Break (4)", "On Break (3)"] <- "p43"
+
+
+# Print the transition matrix
+print(transition_matrix)
+```
+
+Now, obtain the transition probabilities for each rat
+
+```{r}
+names <- character()
+transitions <- list()
+
+for(rat in unique(df$Rat)) {
+  # Obtain data for each rat
+  data.rat <- data.table(df %>% filter(Rat == rat))
+  
+  # Determine the initial state
+  day <- 1
+  state <- data.rat[day, opening]
+  
+  # Initialize transition matrix
+  transition_matrix <- matrix(0, nrow = 5, ncol = 5, dimnames = list(0:4, 0:4))
+
+    for(day in 2:12) {
+      # First opening (0 -> 1)
+      if(state == 0 & data.rat[day, opening] == 1) {
+        transition_matrix["0", "1"] <- transition_matrix["0", "1"] + 1
+        state <- 1
+      }
+      # No opening (0 -> 0)
+      else if(state == 0 & data.rat[day, opening] == 0) {
+        transition_matrix["0", "0"] <- transition_matrix["0", "0"] + 1
+        state <- 0
+      }
+      # First consecutive opening (1 -> 2)
+      else if(state == 1 & data.rat[day, opening] == 1) {
+        transition_matrix["1", "2"] <- transition_matrix["1", "2"] + 1
+        state <- 2
+      }
+      # Consecutive opening (2 -> 2)
+      else if(state == 2 & data.rat[day, opening] == 1) {
+        transition_matrix["2", "2"] <-  transition_matrix["2", "2"] + 1
+        state <- 2
+      }
+      # Break after single opening (1 -> 3)
+      else if(state == 1 & data.rat[day, opening] == 0) {
+        transition_matrix["1", "3"] <- transition_matrix["1", "3"] + 1
+        state <- 3
+      }
+      # Break after consecutive opening (2 -> 3)
+      else if(state == 2 & data.rat[day, opening] == 0) {
+        transition_matrix["2", "3"] <- transition_matrix["2", "3"] + 1
+        state <- 3
+      }
+      # Consecutive break (3 -> 3)
+      else if(state == 3 & data.rat[day, opening] == 0) {
+        transition_matrix["3", "3"] <- transition_matrix["3", "3"] + 1
+        state <- 3
+      }
+      # Opening after break (3 -> 4)
+      else if(state == 3 & data.rat[day, opening] == 1) {
+        transition_matrix["3", "4"] <- transition_matrix["3", "4"] + 1
+        state <- 4
+      }
+      # Consecutive opening after break (4 -> 2)
+      else if(state == 4 & data.rat[day, opening] == 1) {
+        transition_matrix["4", "2"] <- transition_matrix["4", "2"] + 1
+        state <- 2
+      }
+      # Break after 4 (4 -> 3)
+      else if(state == 4 & data.rat[day, opening] == 0) {
+        transition_matrix["4", "3"] <- transition_matrix["4", "3"] + 1
+        state <- 3
+      }
+      
+    }
+    
+  transitions <- append(transitions, list(transition_matrix))
+  names <- append(names, rat)
+} 
+
+names(transitions) <- names
+
+sums <- unlist(lapply(transitions, sum))
+
+# Check which sums did not add to 11 transitions
+# sums[which(sums != 11)]
+```
+
+Normalize occurrences to get transition probabilities
+
+```{r}
+for (i in 1:length(transitions)) {
+  rat_name <- names(transitions)[i] # get the name of the matrix
+  condition <- unique(df$condition[df$Rat == rat_name]) # get the condition for the corresponding rat
+  transitions[[i]] <- list("matrix" = transitions[[i]] / 11, "condition" = condition) # create a list with the matrix and the condition
+}
+```
+
+Perform dimensionality reduction with dbscan, clustering with umap
+
+```{r}
+library(dbscan)
+library(umap)
+library(ggplot2)
+
+# Prepare data for HDBSCAN and UMAP
+data_list <- lapply(transitions, function(x) as.numeric(x$matrix))
+data_matrix <- do.call("rbind", data_list)
+
+# Reduce dimensions using UMAP before clustering
+umap_results <- umap(data_matrix)
+
+# Cluster groups using HDBSCAN
+hdbscan_results <- hdbscan(umap_results$layout, minPts = 25)
+
+# Combine UMAP and HDBSCAN results
+results_df <- data.frame(umap_results$layout, cluster = hdbscan_results$cluster)
+
+```
+
+Check for consistency
+
+```{r}
+# Reduce dimensions using UMAP before clustering
+umap_results <- umap(data_matrix)
+
+# Cluster groups using HDBSCAN
+hdbscan_results <- hdbscan(umap_results$layout, minPts = 25)
+
+# Combine UMAP and HDBSCAN results
+results_df <- data.frame(umap_results$layout, cluster = hdbscan_results$cluster)
+```
+
+```{# Add condition labels from the original data}
+results_df$condition <- sapply(transitions, function(x) x$condition)
+
+library(plotly)
+
+plot <- ggplot(results_df, aes(x = X1, y = X2, color = as.factor(cluster))) +
+  geom_point() +
+  labs(title = "UMAP projection of the dataset", x = "UMAP1", y = "UMAP2", color = "Cluster") +
+  theme_minimal()
+
+plot
+```
+
+```{r}
+
+# Generate the distribution of clusters for each condition
+cluster_distribution <- table(results_df$condition, results_df$cluster)
+
+# Add row totals
+cluster_distribution <- cbind(cluster_distribution, rowSums(cluster_distribution))
+cluster_distribution <- rbind(cluster_distribution, colSums(cluster_distribution))
+
+# Print the distribution dataframe with marginal sums
+print(cluster_distribution)
+```
+
+```{r}
+library(tidyverse)
+
+# Reshaping your long dataframe df to wide format
+wide_df <- df %>%
+  pivot_wider(names_from = day, values_from = opening, names_prefix = "d")
+
+# Merging it with results_df to include the cluster information
+final_df <- cbind(wide_df, results_df[,c("cluster")])
+colnames(final_df)[15] <- "cluster"
+# Checking the final data frame
+rmarkdown::paged_table(final_df)
+
+writexl::write_xlsx(final_df, path = "cluster-results.xlsx")
+```
